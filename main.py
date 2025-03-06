@@ -1,177 +1,130 @@
-import asyncio
 import random
 import requests
-import sqlite3
-from datetime import datetime
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.exceptions import ChatNotFound
-from luhn import generate
+import datetime
+from faker import Faker
+from telegram import Update
+from telegram.ext import Updater, CommandHandler, CallbackContext
 
-# Replace with your actual bot token
-BOT_TOKEN = "8074904664:AAGmKjpGRjtphBk91ABwT_d07l5mZkKt2RY"
-OWNER_ID = 7987662357  # Replace with your Telegram ID
-CHANNEL_USERNAME = "@dar3658"  # Channel to join
+# Telegram Bot Token
+TOKEN = "7685065199:AAG7zSGqItTRJCVLcP-KgGLGGBb71inB_Cs"
 
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+# Required Channel (Users must join)
+CHANNEL_USERNAME = "@Ravanv4"
 
-# Database Setup
-conn = sqlite3.connect("bot_data.db")
-cursor = conn.cursor()
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        username TEXT,
-        bin TEXT,
-        card TEXT,
-        bank TEXT,
-        country TEXT,
-        date TEXT
-    )
-""")
-conn.commit()
+# Initialize Faker for generating random names
+fake = Faker()
 
-async def check_channel_membership(user_id):
-    """Check if the user is a member of the channel"""
+# Check if user is a channel member
+def is_user_member(user_id, bot):
     try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        if member.status in ['member', 'administrator', 'creator']:
-            return True
-        else:
-            return False
-    except ChatNotFound:
+        chat_member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        return chat_member.status in ["member", "administrator", "creator"]
+    except:
         return False
 
-async def send_join_channel_message(user_id):
-    """Send a message with a button to join the channel"""
-    keyboard = InlineKeyboardMarkup()
-    button = InlineKeyboardButton("✅ Join Now", url=f"https://t.me/{CHANNEL_USERNAME}")
-    keyboard.add(button)
-    await bot.send_message(user_id, f"🚨 To use the bot, you need to join the channel first:\n\n{CHANNEL_USERNAME}", reply_markup=keyboard)
-
+# Get BIN info
 def get_bin_info(bin_number):
-    """Fetch bank and country info from BIN"""
-    apis = [
-        f"https://bins.su/lookup/{bin_number}",
-        f"https://lookup.binlist.net/{bin_number}"
-    ]
-    
-    for url in apis:
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                data = response.json()
-                bank = data.get("bank", {}).get("name", "Unknown")
-                country = data.get("country", {}).get("name", "Unknown")
-                return bank, country
-        except:
-            continue
-    
-    return "Unknown", "Unknown"
-
-def generate_card(bin_prefix):
-    """Generate a valid CC number with expiry & CVV"""
-    while len(bin_prefix) < 16:
-        bin_prefix += str(random.randint(0, 9))
-
-    cc_number = generate(bin_prefix[:15])  # Ensure Luhn valid number
-    exp_month = str(random.randint(1, 12)).zfill(2)
-    exp_year = str(random.randint(25, 30))  # Example: 2025-2030
-    cvv = str(random.randint(100, 999))
-
-    return f"{cc_number}|{exp_month}|{exp_year}|{cvv}"
-
-@dp.message_handler(commands=["start"])
-async def start_command(message: Message):
-    """Welcome message and check if user has joined the channel"""
-    user_id = message.from_user.id
-    if await check_channel_membership(user_id):
-        await message.reply("👋 Welcome to the CC Generator Bot! Now you can use the `/gen <BIN> <quantity>` command.")
+    url = f"https://lookup.binlist.net/{bin_number}"
+    response = requests.get(url, headers={"Accept-Version": "3"})
+    if response.status_code == 200:
+        data = response.json()
+        bank = data.get("bank", {}).get("name", "Unknown")
+        country = data.get("country", {}).get("name", "Unknown")
+        scheme = data.get("scheme", "Unknown").title()
+        card_type = data.get("type", "Unknown").title()
+        return f"**BIN Info:**\n🔹 **BIN:** {bin_number}\n🏦 **Bank:** {bank}\n🌍 **Country:** {country}\n💳 **Brand:** {scheme}\n🔄 **Type:** {card_type}"
     else:
-        await send_join_channel_message(user_id)
+        return "❌ Invalid BIN or API error!"
 
-@dp.message_handler(commands=["gen"])
-async def generate_cc(message: Message):
-    """Generate multiple CCs based on BIN & quantity"""
-    user_id = message.from_user.id
-    if not await check_channel_membership(user_id):
-        await send_join_channel_message(user_id)
+# Generate a Luhn-valid card number
+def luhn_generate(bin_number):
+    card_number = [int(digit) for digit in bin_number]
+    while len(card_number) < 15:
+        card_number.append(random.randint(0, 9))
+    check_sum = sum((2 * d if i % 2 == 0 else d) - 9 if (2 * d) > 9 else (2 * d if i % 2 == 0 else d) for i, d in enumerate(card_number[::-1]))
+    card_number.append((10 - (check_sum % 10)) % 10)
+    return ''.join(map(str, card_number))
+
+# Generate expiry date and CVV
+def generate_expiry():
+    return f"{random.randint(1, 12):02d}/{random.randint(datetime.datetime.now().year % 100 + 1, datetime.datetime.now().year % 100 + 5)}"
+
+def generate_cvv():
+    return str(random.randint(100, 999))
+
+# Simulate card checking (Random Approval/Decline)
+def check_card(card_number, expiry, cvv):
+    return f"✅ **Approved ✅**\n🔹 **Card:** {card_number} | {expiry} | {cvv}\n💳 **Status:** Live & Working!\n🤖 **Bot:** Ravan 4.3v" if random.choice([True, False]) else f"❌ **Declined ❌**\n🔹 **Card:** {card_number} | {expiry} | {cvv}\n⚠ **Status:** Declined or Not Working!\n🤖 **Bot:** Ravan 4.3v"
+
+# Fake payment processing function
+def process_payment(amount, card_number, expiry, cvv):
+    response = requests.post("https://random-payment-api.com/pay", json={"amount": amount, "card": card_number, "expiry": expiry, "cvv": cvv})
+    return f"✅ **Payment Successful ✅**\n💰 **Amount:** ${amount}\n🔹 **Card:** {card_number} | {expiry} | {cvv}\n🛒 **Status:** Processed!\n🤖 **Bot:** Ravan 4.3v" if response.status_code == 200 else f"❌ **Payment Failed ❌**\n💰 **Amount:** ${amount}\n🔹 **Card:** {card_number} | {expiry} | {cvv}\n⚠ **Status:** Declined!\n🤖 **Bot:** Ravan 4.3v"
+
+# Generate random email combos and save to Combo.txt
+def generate_combo(amount):
+    domains = ["gmail.com", "outlook.com", "yahoo.com"]
+    combos = []
+
+    for _ in range(amount):
+        name = fake.first_name().lower() + str(random.randint(10, 99))
+        email = f"{name}@{random.choice(domains)}"
+        password = fake.password(length=10)
+        combo = f"{email}:{password}"
+        combos.append(combo)
+
+    with open("Combo.txt", "w") as file:
+        file.write("\n".join(combos))
+
+    return combos
+
+# Command Handlers
+def bin_lookup(update: Update, context: CallbackContext):
+    if len(context.args) != 1:
+        update.message.reply_text("Usage: /bin <BIN>")
         return
-    
-    args = message.text.split()
-    
-    # Validate user input
-    if len(args) < 2 or not args[1].isdigit():
-        await message.reply("❌ Usage: /gen <BIN> <quantity>\nExample: /gen 52185316 10")
+    update.message.reply_text(get_bin_info(context.args[0]), parse_mode="Markdown")
+
+def gen_card(update: Update, context: CallbackContext):
+    if len(context.args) < 1:
+        update.message.reply_text("Usage: /gen <BIN> [Amount] (Max 6 digits, Max 10 cards)")
         return
+    bin_number, amount = context.args[0], min(int(context.args[1]) if len(context.args) > 1 and context.args[1].isdigit() else 1, 10)
+    update.message.reply_text("\n".join(f"{luhn_generate(bin_number)} | {generate_expiry()} | {generate_cvv()}" for _ in range(amount)))
 
-    bin_prefix = args[1]
-    quantity = int(args[2]) if len(args) > 2 and args[2].isdigit() else 1
-
-    if quantity < 1 or quantity > 20:  # Limit to 20 cards
-        await message.reply("❌ You can generate between 1-20 cards at a time.")
+def chk_card(update: Update, context: CallbackContext):
+    if len(context.args) != 3:
+        update.message.reply_text("Usage: /chk <Card_Number> <Expiry (MM/YY)> <CVV>")
         return
+    update.message.reply_text(check_card(*context.args), parse_mode="Markdown")
 
-    bank, country = get_bin_info(bin_prefix)
-    time_generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    cards = [generate_card(bin_prefix) for _ in range(quantity)]
-
-    # Save logs to database
-    for card in cards:
-        cursor.execute("INSERT INTO logs (user_id, username, bin, card, bank, country, date) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                       (message.from_user.id, message.from_user.username, bin_prefix, card, bank, country, time_generated))
-    conn.commit()
-
-    response_text = f"""𝗜𝗻𝗳𝗼 -
-- 𝐁𝐚𝐧𝐤 - {bank}
-- 𝐂𝐨𝐮𝐧𝐭𝐫𝐲 - {country}
-- 𝐓𝐢𝐦𝐞 - {time_generated}
-- 𝐂𝐡𝐞𝐜𝐤𝐞𝐝 - ✅
-
-💳 **Generated {quantity} Cards:**\n""" + "\n".join([f"`{c}`" for c in cards])
-
-    await message.reply(response_text, parse_mode="Markdown")
-
-@dp.message_handler(commands=["logs"])
-async def show_logs(message: Message):
-    """Show the last 5 generated cards (Admin Only)"""
-    if message.from_user.id != OWNER_ID:
-        await message.reply("❌ You are not authorized to access logs.")
+def pay(update: Update, context: CallbackContext):
+    if len(context.args) != 4:
+        update.message.reply_text("Usage: /pay <Amount> <Card_Number> <Expiry (MM/YY)> <CVV>")
         return
+    update.message.reply_text(process_payment(*context.args), parse_mode="Markdown")
 
-    cursor.execute("SELECT user_id, username, bin, card, bank, country, date FROM logs ORDER BY id DESC LIMIT 5")
-    logs = cursor.fetchall()
-
-    if not logs:
-        await message.reply("📜 No logs found.")
+def combo(update: Update, context: CallbackContext):
+    if len(context.args) != 1 or not context.args[0].isdigit():
+        update.message.reply_text("Usage: /combo <AMOUNT> (Max 50)")
         return
+    amount = min(int(context.args[0]), 50)
+    generate_combo(amount)
+    update.message.reply_document(open("Combo.txt", "rb"), caption=f"✅ **Generated {amount} Combos**\n📂 **Saved as:** Combo.txt\n🤖 **Bot:** Ravan 4.3v")
 
-    response = "📜 **Last 5 Logs:**\n"
-    for log in logs:
-        response += f"""
-👤 **User:** {log[1]} (ID: {log[0]})
-🔹 **BIN:** {log[2]}
-💳 **Card:** `{log[3]}`
-🏦 **Bank:** {log[4]}
-🌍 **Country:** {log[5]}
-📅 **Date:** {log[6]}
-──────────────
-"""
-    await message.reply(response, parse_mode="Markdown")
+# Main function to start the bot
+def main():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-@dp.message_handler(commands=["stats"])
-async def show_stats(message: Message):
-    """Show bot usage statistics"""
-    cursor.execute("SELECT COUNT(*) FROM logs")
-    total_generated = cursor.fetchone()[0]
+    dp.add_handler(CommandHandler("bin", bin_lookup))
+    dp.add_handler(CommandHandler("gen", gen_card))
+    dp.add_handler(CommandHandler("chk", chk_card))
+    dp.add_handler(CommandHandler("pay", pay))
+    dp.add_handler(CommandHandler("combo", combo))
 
-    await message.reply(f"📊 **Bot Statistics:**\n🔹 **Total Cards Generated:** {total_generated}")
-
-async def main():
-    await dp.start_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

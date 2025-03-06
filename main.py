@@ -2,7 +2,7 @@ import telebot
 import requests
 
 # Replace with your bot token and channel username
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+BOT_TOKEN = "8074904664:AAGmKjpGRjtphBk91ABwT_d07l5mZkKt2RY"
 CHANNEL_USERNAME = "@dar3658"  # Your channel username
 CHANNEL_LINK = "https://t.me/dar3658"  # Your channel link
 
